@@ -1,0 +1,385 @@
+---
+title: "MAS 61006"
+author: "Connor Simmons"
+date: "April 2024"
+output:
+  pdf_document: default
+  html_document: default
+  fig_caption: yes
+fontsize: 11pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(mice)
+library(lattice)
+library(knitr)
+library(tidyverse)
+library(miceadds)
+
+# plotting packages
+theme_set(theme_bw())
+library(RColorBrewer) 
+library(viridis)
+library(tidybayes)
+library(modelr)
+library(gridExtra)
+library(cowplot)
+library(gridExtra)
+
+set.seed(321)
+```
+
+For this project I chose to look at the [Heart Attack Data Set](https://www.kaggle.com/datasets/sukhmandeepsinghbrar/heart-attack-dataset).
+
+```{r study data, include = FALSE}
+
+Heart_att <- read_csv("https://raw.githubusercontent.com/simmosimmo/Data-Set/main/Medicaldataset.csv")
+
+colnames(Heart_att) <- c("age", "gender", "heart_rate", "SBP", "DBP", "BS", "CK_MB", "troponin", "result")
+
+Heart_att$BS <- ifelse(Heart_att$BS > 120, 1,0)
+Heart_att$result <- ifelse(Heart_att$result == "positive",1,0)
+
+#Heart_attnew <- Heart_att[-c(201:1319),]
+
+#Heart_att$gender <- as.factor(Heart_att$gender)
+#Heart_att$blood_sugar <- as.factor(Heart_att$blood_sugar)
+#Heart_att$result <- as.factor(Heart_att$result)
+
+```
+## The Data
+
+|       **Variables**      	|                                      **Description**                                     	|  **Type**  	|
+|:------------------------:	|:----------------------------------------------------------------------------------------:	|:----------:	|
+|            Age           	|                            The age of the patients (in years)                            	| Continuous 	|
+|          Gender          	|                                   Male = 1, Female = 0                                   	|   Binary   	|
+|        Heart Rate (HR)    	|                     The Heart Rate of patients (in beats per minute)                     	| Continuous 	|
+|  Systolic Blood Pressure (SBP)	|  The amount of blood pressure experienced be the arteries while the heat is **beating**  	| Continuous 	|
+| Diastolic Blood Pressure (DBP)	| The amount of pressure in the arteries while the heart is **resting** between heartbeats 	| Continuous 	|
+|   Blood Sugar (BS)  	|                1 indicates glucose levels greater than 120 and 0 otherwise               	|   Binary   	|
+|           CK-MB (C)         	|                                  A cardiac enzyme marker*                                 	| Continuous 	|
+|         Troponin         	|                               Another cardiac enzyme marker*                              	| Continuous 	|
+|          Result          	|           1 represents a positive heart attack and 0 indicates no heart attack           	|   Binary   	|
+
+Figure 1: A list of all the variables included in the data set along with their description. *High levels of an enzyme marker can be the sign of a heart attack or another heart problem.
+
+## The Model
+
+I will fit a logistic regression model to my data as I want to see how the chance of having a heart attack is affected by the other covariates. Therefore, 'result' will be my depedent variable.
+
+My binary outcome will be modelled as a Bernoulli response,    $Y_i \sim Bernoulli(\mu_i)$
+Where the probability of having a heart attack is given by the covariates as:
+  
+$$\mu_i = P(Y_i=1) = \frac{e^{\sum_{j=1}^{m}\beta_iX_{ij}}}{1 + e^{\sum_{j=1}^{m}\beta_iX_{ij}}}$$
+  
+In which $\mu$ is constrained between 0 and 1. I have applied a logit transformation to $\mu$.
+
+The regression model is:   
+  
+$$logit(\mu_i) =  \beta_{age}X_{age} + \beta_{gender} + \beta_{HR}X_{HR} + \beta_{SBP}X_{SBP} + \beta_{DBP}X_{DBP} + \beta_{BS}X_{BS} + \beta_{C}X_{C} + \beta_{Troponin}X_{Toponin} + \epsilon$$
+  
+
+
+```{r, include = FALSE}
+
+#Create some missing data points (probability of missing = 20%). Using the mechanism for producing "NA"s ensures that our values are missing completely at random (MCAR) which implies missing at random (MAR)
+
+makeMissing <- function(mydf, probMissing){
+  
+  # mydf: your data frame
+  # probMissing: the probability that any single
+  #  element of the data frame will be changed to NA
+  
+  R <- matrix(rbinom(nrow(mydf) * ncol(mydf),
+                     1,
+                     probMissing),
+              nrow = nrow(mydf),
+              ncol = ncol(mydf))
+  mydf[R == 1] <- NA
+  mydf
+}
+
+missing_Heart_att20 <- makeMissing(Heart_att,0.2)
+
+```
+
+
+```{r, include = FALSE}
+
+# Another data frame with missing data points (probability of missing = 30% and 40%)
+
+missing_Heart_att30 <- makeMissing(Heart_att,0.3)
+
+missing_Heart_att40 <- makeMissing(Heart_att,0.4)
+
+```
+
+```{r, include = FALSE}
+
+summary(missing_Heart_att20)
+
+```
+## Exploratory Data Analysis 
+
+```{r, echo=FALSE, warning= FALSE}
+
+
+plot1 <- ggplot(missing_Heart_att20, aes(x = age)) +
+  geom_histogram(binwidth = 1) +
+  labs(x = "Age", y = "Count")
+
+plot2 <- ggplot(missing_Heart_att20, aes(x = heart_rate)) +
+  geom_histogram(bins = 20) +
+  labs(x = "Heart Rate (beats/minute)", y = "Count")
+
+plot3 <- ggplot(missing_Heart_att20, aes(x = SBP)) +
+  geom_histogram(bins = 50) +
+  labs(x = "Systalic BP (mmHg)", y = "Count")
+
+plot4 <- ggplot(missing_Heart_att20, aes(x = DBP)) +
+  geom_histogram(bins = 50) +
+  labs(x = "Diastolic BP", y = "Count")
+
+plot5 <- ggplot(missing_Heart_att20, aes(x = CK_MB)) +
+  geom_histogram(binwidth = 5) +
+  labs(x = "CK_MB", y = "Count")
+
+plot6 <- ggplot(missing_Heart_att20, aes(x = troponin)) +
+  geom_histogram(bins = 30) +
+  labs(x = "Troponin", y = "Count")
+
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, ncol=3, nrow = 2)
+
+```
+Figure 4: Histograms showing the distributions of data within the Heart Attack data set. People over 50 feature more often than younger people and there is an outlier in the Heart Rate data.
+
+The data shows values centred at about 60 years old, which makes sense as older people are more susceptible to heart attacks than younger people. I will check later on to see if the mice algorithm has imputed sensible values.
+
+  
+The following plot checks for collinearity between the variables on the heart attack data frame (with 20% of the data missing). The other data frames with larger amounts of missing data showed the same relationships between the variables so I have not included those plots.
+
+```{r, echo=FALSE}
+
+pairs(missing_Heart_att20[,c(1:8)], )
+
+
+```
+Figure 5: Scatterplot pairs of the variables with missing observations in the Heart Attack dataset
+
+
+
+```{r, include= FALSE}
+pairs(missing_Heart_att30[,c(1:8)])
+
+pairs(missing_Heart_att40[,c(1:8)])
+
+```
+
+
+  
+The only sign of correlation is between Systolic and Diastolic blood pressure.
+
+
+```{r, echo = FALSE}
+ggplot(data = Heart_att, aes(SBP,DBP)) +
+  geom_point() +
+  geom_smooth(method='lm', formula= y~x) +
+  labs(x = "Systolic Blood Pressure", 
+       y = "Diastolic Blood Pressure") +
+  theme(plot.margin = margin(2,2,2,2, "cm")
+        )
+
+```
+Figure 6: Historically systolic blood pressure and diastolic blood pressure frequently show a linear relationship. Although these variable are correlated, they have not been removed as they are not deterministic.
+
+
+## The Method
+
+In this report, I will investigate how well certain methods within the mice imputation process cope with increasing proportions of missing data (from 20%, to 30%, to 40%). I will do this in the following way:
+
+
+* Fit the baseline logistic regression model (shown above) to the data set before any missing data is introduced. Then obtain confidence intervals for each parameter estimate using values given in the R output (in particular the parameter estimate itself and the standard error associated with it).
+* Create three iterations of the heart attack data set with differing proportions of missing data. In this case: 20%, 30% and 40% is used.
+* Fit the same model to these three data sets and obtain confidence intervals for each parameter. This is known as *complete case analysis* as the model will only use complete rows of data within the data set and ignore rows with any missing data.
+* Use the MICE package to impute values for the missing data. Consider using different imputation methods within the mice package (in this report, .... and ..... is used)
+* Refit the model to the imputed data sets and obtain confidence intervals
+* Compare the confidence intervals from the complete case analysis and from the imputed data sets for each parameter estimate to see how close they are to the baseline model
+
+
+
+
+```{r, include = FALSE}
+# Parameter estimates from original data set (no missing data)
+
+original_glm <- glm(result ~ age + gender + SBP + DBP + BS + troponin + CK_MB + heart_rate, family = binomial, data = Heart_att)
+summary(original_glm)
+
+#find confidence interval. This is the perfect model. No missing data.(95%)
+#compare the confidence interval from different models with permuting
+
+#ask what is the best way to compare the models
+
+plot(original_glm)
+
+```
+
+
+
+
+```{r, include=FALSE}
+#Logistic model with missingness 20%
+
+complete_glm <- glm(result ~ age + gender + SBP + DBP + BS + troponin + heart_rate, family = binomial, data = missing_Heart_att20)
+summary(complete_glm)
+
+
+```
+
+
+
+```{r,include=FALSE}
+
+#Logistic Model with missingness 30%
+
+complete_glm30 <- glm(result ~ age + gender + SBP + DBP + BS + troponin + heart_rate, family = binomial, data = missing_Heart_att30)
+summary(complete_glm30)
+
+
+```
+
+
+
+```{r,include=FALSE}
+
+#Logistic Model with missingness 40%
+
+complete_glm40 <- glm(result ~ age + gender + SBP + DBP + BS + troponin + heart_rate, family = binomial, data = missing_Heart_att40)
+summary(complete_glm40)
+
+
+```
+
+## Convergence of the MICE Algorithm
+
+It is important to check that the imputation process has reasonably converged to a stable solution. Without convergence, the imputed values may change significantly between iterations which indicates that the values are not reliable or accurate representations of the missing data.
+
+```{r, include= FALSE}
+
+heart.imp <- mice(missing_Heart_att20, Print = F)
+
+```
+
+
+```{r, include=FALSE}
+plot(heart.imp)
+```
+
+
+```{r, echo=FALSE}
+heart.imp.long <- mice.mids(heart.imp, maxit = 35, print = F)
+
+par(plt = c(0.1, 0.9, 0.1, 0.9))
+
+plot(heart.imp.long) 
+
+
+```
+Figure 7: Convergence diagnostics for MICE algorithm on the heart attack data set, with default of 5 imputations, each for 40 iterations.
+
+Initially, I ran the mice algorithm with only 5 iterations and the values of SDP and BS hardly mixed which suggested non-convergence. In order to improve the imputation, the algorithm was run for a further 305 iterations. As shown in figure 7, the streams mix nicely and they have stabilised which suggests convergence.
+
+Continue from here
+
+As you might expect, the data frames with a higher proportion of missing information to longer to converge. With a 30% proportion of missing data, the algorithm took ..... iterations to converge and with 40% the algorithm took ..... iterations. 
+
+
+
+Fit and pool the data from the multiple data frames
+
+```{r, include = FALSE}
+
+heart_fit <- with(heart.imp.long, lm(result ~ age + gender + SBP + DBP + BS + troponin + heart_rate))
+
+(heart_fit_pool <- pool(heart_fit))
+
+summary(heart_fit_pool)
+
+```
+
+Experiment with at least two of the built-in imputation methods in the mice package. First, using the Unconditional mean imputation method (Method = "mean")
+
+```{r, include = FALSE}
+
+missing_Heart_att20$gender <- as.numeric(missing_Heart_att20$gender)
+missing_Heart_att20$BS <- as.numeric(missing_Heart_att20$BS)
+missing_Heart_att20$result <- as.numeric(missing_Heart_att20$result)
+
+norm_pred_heart_imp <- mice(missing_Heart_att20, m = 5, maxit = 30, print = F)
+
+norm_pred_heart_fit <- with(norm_pred_heart_imp, glm(result ~ age + gender + SBP + DBP + BS + troponin + heart_rate))
+
+(norm_pred_fit_pool <- pool(norm_pred_heart_fit))
+
+
+```
+
+Next, using the Bayesian Linear regression (method = "norm")
+
+```{r, include=FALSE}
+
+norm_heart_imp <- mice(missing_Heart_att20, method = "norm", m = 5, maxit = 25, print = F)
+
+norm_heart_fit <- with(norm_heart_imp, glm(result ~ age + gender + SBP + DBP + BS + troponin + heart_rate))
+
+(norm_fit_pool <- pool(norm_heart_fit))
+
+
+```
+
+
+
+```{r, include=FALSE}
+
+heart.imp40 <- mice(missing_Heart_att40, Print = F)
+heart.imp.long40 <- mice.mids(heart.imp40, maxit = 35, print = F)
+
+heart_fit40 <- with(heart.imp.long40, lm(heart_rate ~ age + gender + SBP + DBP + BS + troponin))
+
+(heart_fit_pool40 <- pool(heart_fit40))
+
+
+```
+
+Using the data set with 40% missing data as apposed to 20%, gives much large values of $lamda$ as we would expect. Seeing as $Lamda$ represents the proportion of the variance due which is due to missing data.
+
+
+```{r, echo = FALSE}
+model_variables <- c("Intercept", "age", "gender", "Systolic Blood Pressure", "Diastolic Blood Pressure", "Blood Sugar", "Troponin")
+orig_parameter_est <- c(66.143118,-0.099951,-3.01814,-0.154927,0.563665,-0.009793,0.555504)
+orig_se <- c(10.633614,0.104552,3.002963,0.066863,0.124467,0.018887,1.233687)
+orig_df <- data.frame(model_variables, orig_parameter_est, orig_se)
+kable(orig_df, "pipe", col.names = c("Explantory Variables","Parameter Estimates", "Standard Errors"), align = c("l","c","c"), caption = "Original Parameter Estimates (No Missing Data)")
+
+comp_parameter_est <- c(74.47066, -0.72205, -3.53930, -0.27656, 1.27797, -0.04754, 1.20874)
+comp_se <- c(38.29022, 0.40502, 11.54357, 0.26742, 0.49104, 0.07194, 4.45535)
+comp_df <- data.frame(model_variables, comp_parameter_est, comp_se)
+kable(comp_df, "pipe", col.names = c("Explantory Variables","Parameter Estimates", "Standard Errors"), align = c("l","c","c"), caption = "Complete Case Anaylsis (Modified Data Set)")
+
+mice_parameter_est <- c(59.55579385,-0.11712960,-2.25589235,-0.15508631,0.67222651,-0.01129411,1.85900469)
+mice_se <- c(2.614747e+02, 2.215104e-02,1.360201e+01,1.170735e-02,1.090501e-01,5.421176e-04, 1.383770e+01)
+mice_df <- data.frame(model_variables, mice_parameter_est, mice_se)
+kable(mice_df, "pipe", col.names = c("Explantory Variables","Parameter Estimates", "Standard Errors"), align = c("l","c","c"), caption = "Multiple Imputation with MICE (Modified Data Set)")
+
+```
+
+
+## References
+
+
+[1]: Stef van Buuren, Karin Groothuis-Oudshoorn (2011). mice: Multivariate Imputation by Chained
+  Equations in R. Journal of Statistical Software, 45(3), 1-67. DOI 10.18637/jss.v045.i03.
+
+
+
+
